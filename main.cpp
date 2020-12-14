@@ -17,20 +17,18 @@ int getCurBlock() {
     return result;
 }
 
-DWORD WINAPI partialSolver(LPVOID mutexArg) {
+DWORD WINAPI partialSolver(LPVOID criticalSectionArg) {
     double result = 0;
     int localCurBlock;
-    HANDLE mutex = (HANDLE)mutexArg;
+    auto criticalSection = (CRITICAL_SECTION*)criticalSectionArg;
     while (true) {
-        auto waitResult = WaitForSingleObject(mutex, INFINITE);
-        if (waitResult == WAIT_FAILED) {
-            std::cout << "WaitForSingleObject failed" << std::endl;
-            break;
-        }
+        EnterCriticalSection(criticalSection);
 
         pi += result;
         localCurBlock = getCurBlock();
-        ReleaseMutex(mutex);
+
+        LeaveCriticalSection(criticalSection);
+
         if (localCurBlock == -1) {
             break;
         }
@@ -39,7 +37,6 @@ DWORD WINAPI partialSolver(LPVOID mutexArg) {
             result += 4 / (1.0 + pow((i + 0.5) / N, 2.0));
         }
     }
-    CloseHandle(mutex);
     return 0;
 }
 
@@ -50,13 +47,15 @@ int main(int argc, char* argv[]) {
         return 0;
     }
     int threadAmount = atoi(argv[1]);
-    HANDLE process = GetCurrentProcess();
-    HANDLE mutex = CreateMutexW(nullptr, FALSE, nullptr);
+
+    CRITICAL_SECTION criticalSection;
+    if (!InitializeCriticalSectionAndSpinCount(&criticalSection, 0x00000400) ) {
+        std::cout << "Cannot InitializeCriticalSection" << std::endl;
+        return 0;
+    }
     std::vector<HANDLE> threads;
     for (int i = 0; i < threadAmount; ++i) {
-        HANDLE threadMutex;
-        DuplicateHandle(process, mutex, process, &threadMutex, 0, FALSE, DUPLICATE_SAME_ACCESS);
-        threads.push_back(CreateThread(nullptr, 0, partialSolver, threadMutex, CREATE_SUSPENDED, nullptr));
+        threads.push_back(CreateThread(nullptr, 0, partialSolver, &criticalSection, CREATE_SUSPENDED, nullptr));
     }
     auto start = GetCurrentTime();
     for (HANDLE thread : threads) {
@@ -77,5 +76,5 @@ int main(int argc, char* argv[]) {
     for (HANDLE thread : threads) {
         CloseHandle(thread);
     }
-    CloseHandle(mutex);
+    DeleteCriticalSection(&criticalSection);
 }
